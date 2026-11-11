@@ -1,0 +1,87 @@
+name: build-ardour-windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Disable autocrlf
+        run: git config --global core.autocrlf input
+        shell: bash
+
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          cache: true
+          install: >-
+            base-devel
+            git
+            python
+            pacboy
+
+      - name: Install deps
+        run: |
+          pacboy -S :x \
+            gcc:x python:x cmake:x pkgconf:x \
+            boost:x curl:x fftw:x flac:x taglib:x \
+            libogg:x libvorbis:x \
+            gtkmm:x pangomm:x libxml2:x \
+            aubio:x lilv:x serd:x sord:x sratom:x lv2:x \
+            rubberband:x vamp-plugin-sdk:x \
+            libsndfile:x libsamplerate:x \
+            portaudio:x jack2:x \
+            fontconfig:x pango:x cairo:x \
+            drmingw:x mcfgthread:x
+
+      - name: Clone Ardour (full clone)
+        run: |
+          git clone https://github.com/Ardour/ardour.git
+          cd ardour
+          # 可改成指定版本：git checkout 9.8
+
+      - name: Configure
+        working-directory: ardour
+        run: |
+          export CFLAGS="-mstackrealign"
+          export CXXFLAGS="-mstackrealign"
+          python waf configure \
+            --dist-target=mingw \
+            --prefix=/c/ardour-install \
+            --configdir=share \
+            --optimize \
+            --cxx17 \
+            --ptformat \
+            --windows-vst \
+            --with-backends=portaudio,jack,dummy
+
+      - name: Build
+        working-directory: ardour
+        run: |
+          python waf build -j$(nproc)
+
+      - name: Install
+        working-directory: ardour
+        run: |
+          python waf install
+
+      - name: Package
+        run: |
+          cd /c
+          zip -r ardour-windows.zip ardour-install
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ardour-windows
+          path: C:\ardour-windows.zip
